@@ -1,0 +1,80 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  DynamoDB "Orders" table provisioned with AWS SAM.
+  On-Demand billing, Standard-IA table class, two Global Secondary Indexes.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, prod]
+    Description: Deployment environment (drives naming and prod-only protections).
+
+Conditions:
+  IsProd: !Equals [!Ref Environment, prod]
+
+Resources:
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    # Keep prod data if the stack is ever deleted; dev is disposable.
+    DeletionPolicy: !If [IsProd, Retain, Delete]
+    UpdateReplacePolicy: !If [IsProd, Retain, Delete]
+    Properties:
+      TableName: !Sub "orders-${Environment}"
+      BillingMode: PAY_PER_REQUEST              # On-Demand
+      TableClass: STANDARD_INFREQUENT_ACCESS    # non-default storage class
+      DeletionProtectionEnabled: !If [IsProd, true, false]
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: !If [IsProd, true, false]
+
+      # Only key attributes (table + index keys) are declared here; DynamoDB is
+      # schemaless for everything else. CustomerId, OrderStatus and CreatedAt
+      # are the named non-key attributes of the base table.
+      AttributeDefinitions:
+        - AttributeName: OrderId
+          AttributeType: S
+        - AttributeName: CustomerId
+          AttributeType: S
+        - AttributeName: OrderStatus
+          AttributeType: S
+        - AttributeName: CreatedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: OrderId
+          KeyType: HASH
+
+      GlobalSecondaryIndexes:
+        # "All orders for a customer, newest first"
+        - IndexName: CustomerIndex
+          KeySchema:
+            - AttributeName: CustomerId
+              KeyType: HASH
+            - AttributeName: CreatedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        # "All orders in a given status (e.g. PENDING), by date"
+        - IndexName: StatusIndex
+          KeySchema:
+            - AttributeName: OrderStatus
+              KeyType: HASH
+            - AttributeName: CreatedAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Project
+          Value: module7-dynamodb-sam
+        - Key: ManagedBy
+          Value: sam
+
+Outputs:
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref OrdersTable
+  TableArn:
+    Description: DynamoDB table ARN
+    Value: !GetAtt OrdersTable.Arn

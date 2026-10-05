@@ -1,0 +1,34 @@
+# Per-environment SAM deploy configuration (used for local deploys:
+#   sam build && sam deploy --config-env dev|prod).
+# CI uses the same values, set explicitly in each pipeline workflow.
+version = 0.1
+
+[default.global.parameters]
+region = "eu-north-1"
+
+[default.validate.parameters]
+lint = true
+
+[dev.deploy.parameters]
+stack_name = "module7-dynamodb-sam-dev"
+s3_bucket = "aws-sam-cli-managed-dev-pipeline-r-artifactsbucket-7wnmhrghprks"
+s3_prefix = "module7-dynamodb-sam-dev"
+region = "eu-north-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=dev"
+role_arn = "arn:aws:iam::615299752577:role/module7-dynamodb-sam-dev-cfn-exec"
+confirm_changeset = false
+fail_on_empty_changeset = false
+tags = "Environment=dev Project=module7-dynamodb-sam"
+
+[prod.deploy.parameters]
+stack_name = "module7-dynamodb-sam-prod"
+s3_bucket = "aws-sam-cli-managed-prod-pipeline--artifactsbucket-4uy7re6aiezl"
+s3_prefix = "module7-dynamodb-sam-prod"
+region = "eu-north-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Environment=prod"
+role_arn = "arn:aws:iam::615299752577:role/module7-dynamodb-sam-prod-cfn-exec"
+confirm_changeset = true
+fail_on_empty_changeset = false
+tags = "Environment=prod Project=module7-dynamodb-sam"

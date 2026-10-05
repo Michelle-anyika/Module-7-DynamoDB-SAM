@@ -1,0 +1,95 @@
+name: Pipeline - dev
+
+# Dev pipeline: deploys ONLY the dev stack (orders-dev table) using the dev
+# SAM pipeline resources (dev OIDC role, dev CFN execution role, dev artifact bucket).
+on:
+  push:
+    branches: [develop]
+    paths:
+      - template.yaml
+      - samconfig.toml
+      - .github/workflows/pipeline-dev.yml
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # OIDC -> AWS, no long-lived keys
+  contents: read
+
+concurrency:
+  group: pipeline-dev
+  cancel-in-progress: false
+
+env:
+  ENVIRONMENT: dev
+  SAM_TEMPLATE: template.yaml
+  STACK_NAME: module7-dynamodb-sam-dev
+  AWS_REGION: eu-north-1
+  PIPELINE_EXECUTION_ROLE: arn:aws:iam::615299752577:role/aws-sam-cli-managed-dev-pipel-PipelineExecutionRole-SGy8mlJ6Mf8g
+  CLOUDFORMATION_EXECUTION_ROLE: arn:aws:iam::615299752577:role/module7-dynamodb-sam-dev-cfn-exec
+  ARTIFACTS_BUCKET: aws-sam-cli-managed-dev-pipeline-r-artifactsbucket-7wnmhrghprks
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - name: Validate template
+        run: sam validate --lint --template ${SAM_TEMPLATE} --region ${AWS_REGION}
+      - name: Build
+        run: sam build --template ${SAM_TEMPLATE}
+      - name: Assume dev pipeline role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.PIPELINE_EXECUTION_ROLE }}
+          role-session-name: dev-packaging
+          role-duration-seconds: 3600
+      - name: Package to dev artifact bucket
+        run: |
+          sam package \
+            --s3-bucket ${ARTIFACTS_BUCKET} \
+            --s3-prefix ${STACK_NAME} \
+            --region ${AWS_REGION} \
+            --output-template-file packaged-dev.yaml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packaged-dev.yaml
+          path: packaged-dev.yaml
+
+  deploy:
+    needs: build-and-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: packaged-dev.yaml
+      - name: Assume dev pipeline role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.PIPELINE_EXECUTION_ROLE }}
+          role-session-name: dev-deployment
+          role-duration-seconds: 3600
+      - name: Deploy dev stack
+        run: |
+          sam deploy \
+            --stack-name ${STACK_NAME} \
+            --template packaged-dev.yaml \
+            --capabilities CAPABILITY_IAM \
+            --region ${AWS_REGION} \
+            --s3-bucket ${ARTIFACTS_BUCKET} \
+            --s3-prefix ${STACK_NAME} \
+            --no-fail-on-empty-changeset \
+            --no-confirm-changeset \
+            --parameter-overrides Environment=${ENVIRONMENT} \
+            --tags Environment=${ENVIRONMENT} Project=module7-dynamodb-sam \
+            --role-arn ${CLOUDFORMATION_EXECUTION_ROLE}
+      - name: Verify table configuration
+        run: ./scripts/verify-table.sh "orders-${ENVIRONMENT}" "${AWS_REGION}"

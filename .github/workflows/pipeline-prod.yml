@@ -1,0 +1,96 @@
+name: Pipeline - prod
+
+# Prod pipeline: deploys ONLY the prod stack (orders-prod table) using the prod
+# SAM pipeline resources (prod OIDC role, prod CFN execution role, prod artifact bucket).
+# Runs on main only; changes reach main via reviewed PRs from develop.
+on:
+  push:
+    branches: [main]
+    paths:
+      - template.yaml
+      - samconfig.toml
+      - .github/workflows/pipeline-prod.yml
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # OIDC -> AWS, no long-lived keys
+  contents: read
+
+concurrency:
+  group: pipeline-prod
+  cancel-in-progress: false
+
+env:
+  ENVIRONMENT: prod
+  SAM_TEMPLATE: template.yaml
+  STACK_NAME: module7-dynamodb-sam-prod
+  AWS_REGION: eu-north-1
+  PIPELINE_EXECUTION_ROLE: arn:aws:iam::615299752577:role/aws-sam-cli-managed-prod-pipe-PipelineExecutionRole-ZdYsUq2Sw60V
+  CLOUDFORMATION_EXECUTION_ROLE: arn:aws:iam::615299752577:role/module7-dynamodb-sam-prod-cfn-exec
+  ARTIFACTS_BUCKET: aws-sam-cli-managed-prod-pipeline--artifactsbucket-4uy7re6aiezl
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - name: Validate template
+        run: sam validate --lint --template ${SAM_TEMPLATE} --region ${AWS_REGION}
+      - name: Build
+        run: sam build --template ${SAM_TEMPLATE}
+      - name: Assume prod pipeline role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.PIPELINE_EXECUTION_ROLE }}
+          role-session-name: prod-packaging
+          role-duration-seconds: 3600
+      - name: Package to prod artifact bucket
+        run: |
+          sam package \
+            --s3-bucket ${ARTIFACTS_BUCKET} \
+            --s3-prefix ${STACK_NAME} \
+            --region ${AWS_REGION} \
+            --output-template-file packaged-prod.yaml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packaged-prod.yaml
+          path: packaged-prod.yaml
+
+  deploy:
+    needs: build-and-package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: packaged-prod.yaml
+      - name: Assume prod pipeline role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.PIPELINE_EXECUTION_ROLE }}
+          role-session-name: prod-deployment
+          role-duration-seconds: 3600
+      - name: Deploy prod stack
+        run: |
+          sam deploy \
+            --stack-name ${STACK_NAME} \
+            --template packaged-prod.yaml \
+            --capabilities CAPABILITY_IAM \
+            --region ${AWS_REGION} \
+            --s3-bucket ${ARTIFACTS_BUCKET} \
+            --s3-prefix ${STACK_NAME} \
+            --no-fail-on-empty-changeset \
+            --no-confirm-changeset \
+            --parameter-overrides Environment=${ENVIRONMENT} \
+            --tags Environment=${ENVIRONMENT} Project=module7-dynamodb-sam \
+            --role-arn ${CLOUDFORMATION_EXECUTION_ROLE}
+      - name: Verify table configuration
+        run: ./scripts/verify-table.sh "orders-${ENVIRONMENT}" "${AWS_REGION}"

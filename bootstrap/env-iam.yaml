@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Per-environment IAM for the module7-dynamodb-sam SAM pipeline.
+  - CloudFormationExecutionRole: least-privilege role CloudFormation uses to
+    manage ONLY this environment's table (replaces SAM's default admin role).
+  - VerifyPolicy: lets the SAM pipeline execution role smoke-test ONLY this
+    environment's table after deployment (attached once the role exists).
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, prod]
+  PipelineExecutionRoleName:
+    Type: String
+    Default: ""
+    Description: Name of the role created by `sam pipeline bootstrap` (empty on first deploy).
+
+Conditions:
+  HasPipelineRole: !Not [!Equals [!Ref PipelineExecutionRoleName, ""]]
+
+Resources:
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "module7-dynamodb-sam-${Environment}-cfn-exec"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudformation.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: manage-env-table
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EnvTableOnly
+                Effect: Allow
+                Action: dynamodb:*
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/orders-${Environment}"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/orders-${Environment}/*"
+              - Sid: SamTransform
+                Effect: Allow
+                Action: cloudformation:CreateChangeSet
+                Resource: !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31"
+              - Sid: ReadOnlyDiscovery
+                Effect: Allow
+                Action:
+                  - dynamodb:ListTables
+                  - dynamodb:DescribeLimits
+                  - application-autoscaling:Describe*
+                Resource: "*"
+      Tags:
+        - { Key: Environment, Value: !Ref Environment }
+        - { Key: Project, Value: module7-dynamodb-sam }
+
+  VerifyPolicy:
+    Type: AWS::IAM::Policy
+    Condition: HasPipelineRole
+    Properties:
+      PolicyName: !Sub "module7-dynamodb-sam-${Environment}-verify"
+      Roles: [!Ref PipelineExecutionRoleName]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SmokeTestEnvTable
+            Effect: Allow
+            Action:
+              - dynamodb:DescribeTable
+              - dynamodb:PutItem
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+              - dynamodb:Query
+            Resource:
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/orders-${Environment}"
+              - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/orders-${Environment}/index/*"
+
+Outputs:
+  CloudFormationExecutionRoleArn:
+    Value: !GetAtt CloudFormationExecutionRole.Arn

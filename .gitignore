@@ -1,0 +1,6 @@
+.aws-sam/build/
+.aws-sam/cache/
+packaged-*.yaml
+*.pyc
+.env
+.aws-sam/build.toml
