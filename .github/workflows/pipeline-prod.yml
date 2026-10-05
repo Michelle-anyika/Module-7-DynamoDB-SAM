@@ -9,6 +9,8 @@ on:
     paths:
       - template.yaml
       - samconfig.toml
+      - .aws-sam/pipeline/pipelineconfig.toml
+      - scripts/**
       - .github/workflows/pipeline-prod.yml
   workflow_dispatch:
 

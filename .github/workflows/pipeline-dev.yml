@@ -8,6 +8,8 @@ on:
     paths:
       - template.yaml
       - samconfig.toml
+      - .aws-sam/pipeline/pipelineconfig.toml
+      - scripts/**
       - .github/workflows/pipeline-dev.yml
   workflow_dispatch:
 

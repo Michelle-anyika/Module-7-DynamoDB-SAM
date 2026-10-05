@@ -44,6 +44,10 @@ All of it is in [`template.yaml`](template.yaml).
   environment gets its own artifact bucket. See [`.aws-sam/pipeline/pipelineconfig.toml`](.aws-sam/pipeline/pipelineconfig.toml).
 * **Branch-scoped trust.** The dev role's OIDC trust policy only accepts `refs/heads/develop`,
   and the prod role only accepts `refs/heads/main`. A dev run can't get prod credentials.
+  The trust uses GitHub's **immutable OIDC subject**
+  (`repo:Michelle-anyika@193885820/Module-7-DynamoDB-SAM@1405722144:ref:refs/heads/<branch>`).
+  It is pinned to the owner and repo IDs, so it survives a rename and can't be claimed by
+  someone who recreates a repo with the same name.
 * **Least privilege.** SAM's default CloudFormation execution role has
   AdministratorAccess. This project replaces it with
   [`bootstrap/env-iam.yaml`](bootstrap/env-iam.yaml), which only allows actions on
